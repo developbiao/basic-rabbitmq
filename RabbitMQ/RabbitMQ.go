@@ -11,7 +11,7 @@ const MQURL = "amqp://test:123456@192.168.56.38:5672/basic"
 
 // rabbitMQ struct
 type RabbitMQ struct {
-	conn	*amqp.Connection
+	conn    *amqp.Connection
 	channel *amqp.Channel
 
 	// Queue name
@@ -56,7 +56,7 @@ func NewRabbitMQSimple(queueName string) *RabbitMQ {
 	rabbitmq.failOnErr(err, "failed to connect rabbitmq!")
 
 	// Get channel
-	rabbitmq.channel, err =rabbitmq.conn.Channel()
+	rabbitmq.channel, err = rabbitmq.conn.Channel()
 	rabbitmq.failOnErr(err, "failed to open channel")
 	return rabbitmq
 }
@@ -66,12 +66,12 @@ func (r *RabbitMQ) PublishSimple(message string) {
 	// request queue if not exists create queue
 	_, err := r.channel.QueueDeclare(
 		r.QueueName,
-		false, 		//  persistence
-		false, 	// auto delete
-		 false, 	// exclusive other
-		 false, 		// block
-		 nil, 		// other arguments
-		)
+		false, //  persistence
+		false, // auto delete
+		false, // exclusive other
+		false, // block
+		nil,   // other arguments
+	)
 
 	if err != nil {
 		fmt.Println(err)
@@ -85,7 +85,7 @@ func (r *RabbitMQ) PublishSimple(message string) {
 		false, // if set is true when not found consumer return message to sender
 		amqp.Publishing{
 			ContentType: "text/plain",
-			Body: []byte(message),
+			Body:        []byte(message),
 		})
 }
 
@@ -107,9 +107,9 @@ func (r *RabbitMQ) ConsumeSimple() {
 	// Receive message
 	msgs, err := r.channel.Consume(
 		q.Name, // queue
-		"", // consumer
-		true, // auto ack
-		false, // exclusive
+		"",     // consumer
+		true,   // auto ack
+		false,  // exclusive
 		false,
 		false,
 		nil,
@@ -130,7 +130,101 @@ func (r *RabbitMQ) ConsumeSimple() {
 
 }
 
+// Create pub/sub mode RabbitMQ instance
+func NewRabbitMQPubSub(exchangeName string) *RabbitMQ {
+	rabbitmq := NewRabbitMQ("", exchangeName, "")
+	var err error
 
+	// Get connection
+	rabbitmq.conn, err = amqp.Dial(rabbitmq.Mqurl)
+	rabbitmq.failOnErr(err, "failed to connect rabbitmq!")
 
+	// Get channel
+	rabbitmq.channel, err = rabbitmq.conn.Channel()
+	rabbitmq.failOnErr(err, "failed to open a channel")
+	return rabbitmq
+}
 
+// pub/sub producer
+func (r *RabbitMQ) PublishPub(message string) {
+	// try to create exchange
+	err := r.channel.ExchangeDeclare(
+		r.Exchange,
+		"fanout",
+		true,
+		false,
+		false, // when internal is true exchange just using switch to other, client cannot use it
+		false,
+		nil,
+	)
 
+	r.failOnErr(err, "Failed to declare an exchange")
+
+	// send message
+	err = r.channel.Publish(
+		r.Exchange,
+		"",
+		false,
+		false,
+		amqp.Publishing{
+			ContentType: "text/plain",
+			Body:        []byte(message),
+		})
+}
+
+// pub/sub consumer
+func (r *RabbitMQ) RecieveSub() {
+	// Try to create exchange
+	err := r.channel.ExchangeDeclare(
+		r.Exchange,
+		"fanout",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+
+	r.failOnErr(err, "Failed to declare an exchange!")
+
+	// try to create queue
+	q, err := r.channel.QueueDeclare(
+		"", // random producer queue name
+		false,
+		false,
+		true,
+		false,
+		nil,
+	)
+
+	// bind queue on exchange
+	err = r.channel.QueueBind(
+		q.Name,
+		"", // pub/sub mode here kee is empty
+		r.Exchange,
+		false,
+		nil,
+	)
+
+	// consume message
+	messages, err := r.channel.Consume(
+		q.Name,
+		"",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+
+	forever := make(chan bool)
+	go func() {
+		for d := range messages {
+			log.Printf("Received a message: %s", d.Body)
+		}
+	}()
+
+	fmt.Println("[*] Waiting for messages. To exit press CTRL + C")
+	<-forever
+
+}
