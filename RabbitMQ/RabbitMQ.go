@@ -228,3 +228,103 @@ func (r *RabbitMQ) RecieveSub() {
 	<-forever
 
 }
+
+// Create rabbitMQ routing mode instance
+func NewRabbitMQRouting(exchangeName, routingKey string) *RabbitMQ {
+	// create RabbitMQ instance
+	rabbitmq := NewRabbitMQ("", exchangeName, routingKey)
+	var err error
+
+	// Get connection
+	rabbitmq.conn, err = amqp.Dial(rabbitmq.Mqurl)
+	rabbitmq.failOnErr(err, "failed to connect rabbitmq!")
+
+	// Get channel
+	rabbitmq.channel, err = rabbitmq.conn.Channel()
+	rabbitmq.failOnErr(err, "failed to open channel")
+	return rabbitmq
+}
+
+// pub/sub producer
+func (r *RabbitMQ) PublishRouting(message string) {
+	// try to create exchange
+	err := r.channel.ExchangeDeclare(
+		r.Exchange,
+		"direct",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+
+	r.failOnErr(err, "Failed to declare an exchange")
+
+	// send message
+	err = r.channel.Publish(
+		r.Exchange,
+		r.Key,
+		false,
+		false,
+		amqp.Publishing{
+			ContentType: "text/plain",
+			Body:        []byte(message),
+		})
+}
+
+// Routing consumer
+func (r *RabbitMQ) RecieveRouting() {
+	// Try to create exchange
+	err := r.channel.ExchangeDeclare(
+		r.Exchange,
+		"direct",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+
+	r.failOnErr(err, "Failed to declare an exchange!")
+
+	// try to create queue
+	q, err := r.channel.QueueDeclare(
+		"", // random producer queue name
+		false,
+		false,
+		true,
+		false,
+		nil,
+	)
+
+	// bind queue on exchange
+	err = r.channel.QueueBind(
+		q.Name,
+		r.Key, // routing mode  key is required
+		r.Exchange,
+		false,
+		nil,
+	)
+
+	// consume message
+	messages, err := r.channel.Consume(
+		q.Name,
+		"",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+
+	forever := make(chan bool)
+	go func() {
+		for d := range messages {
+			log.Printf("Received a message: %s", d.Body)
+		}
+	}()
+
+	fmt.Println("[*] Waiting for messages. To exit press CTRL + C")
+	<-forever
+
+}
